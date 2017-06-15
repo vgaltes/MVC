@@ -7,7 +7,6 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Core;
-using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
@@ -138,7 +137,7 @@ namespace Microsoft.AspNetCore.Mvc.Formatters
             {
                 var response = context.HttpContext.Response;
                 response.StatusCode = StatusCodes.Status406NotAcceptable;
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }
 
             context.ContentType = selectedMediaType;
@@ -185,7 +184,7 @@ namespace Microsoft.AspNetCore.Mvc.Formatters
                 for (var i = 0; i < acceptValues.Count; i++)
                 {
                     var charset = acceptValues[i].Value;
-                    if (!string.IsNullOrEmpty(charset))
+                    if (!StringSegment.IsNullOrEmpty(charset))
                     {
                         for (var j = 0; j < SupportedEncodings.Count; j++)
                         {
@@ -208,7 +207,6 @@ namespace Microsoft.AspNetCore.Mvc.Formatters
         private IList<StringWithQualityHeaderValue> Sort(IList<StringWithQualityHeaderValue> values)
         {
             var sortNeeded = false;
-            var count = 0;
 
             for (var i = 0; i < values.Count; i++)
             {
@@ -219,12 +217,7 @@ namespace Microsoft.AspNetCore.Mvc.Formatters
                 }
                 else if (value.Quality != null)
                 {
-                    count++;
                     sortNeeded = true;
-                }
-                else
-                {
-                    count++;
                 }
             }
 

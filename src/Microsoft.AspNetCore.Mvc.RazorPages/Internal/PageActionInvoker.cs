@@ -4,16 +4,16 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
+using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc.Abstractions;
-using Microsoft.AspNetCore.Mvc.Core.Internal;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Microsoft.AspNetCore.Mvc.Razor;
 using Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Mvc.ViewFeatures.Internal;
 using Microsoft.Extensions.Logging;
 
@@ -24,10 +24,19 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
         private readonly IPageHandlerMethodSelector _selector;
         private readonly PageContext _pageContext;
         private readonly ParameterBinder _parameterBinder;
+        private readonly ITempDataDictionaryFactory _tempDataFactory;
+        private readonly HtmlHelperOptions _htmlHelperOptions;
+        private readonly CompiledPageActionDescriptor _actionDescriptor;
 
+        private Dictionary<string, object> _arguments;
+        private HandlerMethodDescriptor _handler;
         private Page _page;
-        private object _model;
-        private ExceptionContext _exceptionContext;
+        private object _pageModel;
+        private ViewContext _viewContext;
+
+        private PageHandlerSelectedContext _handlerSelectedContext;
+        private PageHandlerExecutingContext _handlerExecutingContext;
+        private PageHandlerExecutedContext _handlerExecutedContext;
 
         public PageActionInvoker(
             IPageHandlerMethodSelector handlerMethodSelector,
@@ -35,31 +44,42 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
             ILogger logger,
             PageContext pageContext,
             IFilterMetadata[] filterMetadata,
-            IList<IValueProviderFactory> valueProviderFactories,
             PageActionInvokerCacheEntry cacheEntry,
-            ParameterBinder parameterBinder)
+            ParameterBinder parameterBinder,
+            ITempDataDictionaryFactory tempDataFactory,
+            HtmlHelperOptions htmlHelperOptions)
             : base(
                   diagnosticSource,
                   logger,
                   pageContext,
                   filterMetadata,
-                  valueProviderFactories)
+                  pageContext.ValueProviderFactories)
         {
             _selector = handlerMethodSelector;
             _pageContext = pageContext;
             CacheEntry = cacheEntry;
             _parameterBinder = parameterBinder;
+            _tempDataFactory = tempDataFactory;
+            _htmlHelperOptions = htmlHelperOptions;
+
+            _actionDescriptor = pageContext.ActionDescriptor;
         }
 
-        public PageActionInvokerCacheEntry CacheEntry { get; }
+        // Internal for testing
+        internal PageActionInvokerCacheEntry CacheEntry { get; }
+
+        private bool HasPageModel => _actionDescriptor.HandlerTypeInfo != _actionDescriptor.PageTypeInfo;
+
+        // Internal for testing
+        internal PageContext PageContext => _pageContext;
 
         /// <remarks>
         /// <see cref="ResourceInvoker"/> for details on what the variables in this method represent.
         /// </remarks>
         protected override async Task InvokeInnerFilterAsync()
         {
-            var next = State.ResourceInnerBegin;
-            var scope = Scope.Resource;
+            var next = State.PageBegin;
+            var scope = Scope.Invoker;
             var state = (object)null;
             var isCompleted = false;
 
@@ -68,235 +88,494 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
                 await Next(ref next, ref scope, ref state, ref isCompleted);
             }
         }
-
+        
         protected override void ReleaseResources()
         {
-            if (_model != null && CacheEntry.ReleaseModel != null)
+            if (_pageModel != null && CacheEntry.ReleaseModel != null)
             {
-                CacheEntry.ReleaseModel(_pageContext, _model);
+                CacheEntry.ReleaseModel(_pageContext, _pageModel);
             }
 
             if (_page != null && CacheEntry.ReleasePage != null)
             {
-                CacheEntry.ReleasePage(_pageContext, _page);
+                CacheEntry.ReleasePage(_pageContext, _viewContext, _page);
+            }
+        }
+
+        private object CreateInstance()
+        {
+            if (HasPageModel)
+            {
+                // Since this is a PageModel, we need to activate it, and then run a handler method on the model.
+                _pageModel = CacheEntry.ModelFactory(_pageContext);
+                _pageContext.ViewData.Model = _pageModel;
+
+                return _pageModel;
+            }
+            else
+            {
+                // Since this is a Page without a PageModel, we need to create the Page before running a handler method.
+                _viewContext = new ViewContext(
+                    _pageContext,
+                    NullView.Instance,
+                    _pageContext.ViewData,
+                    _tempDataFactory.GetTempData(_pageContext.HttpContext),
+                    TextWriter.Null,
+                    _htmlHelperOptions);
+
+                _page = (Page)CacheEntry.PageFactory(_pageContext, _viewContext);
+
+                if (_actionDescriptor.ModelTypeInfo == _actionDescriptor.PageTypeInfo)
+                {
+                    _pageContext.ViewData.Model = _page;
+                }
+
+                return _page;
+            }
+        }
+
+        private HandlerMethodDescriptor SelectHandler()
+        {
+            return _selector.Select(_pageContext);
+        }
+
+        private Task BindArgumentsAsync()
+        {
+            // Perf: Avoid allocating async state machines where possible. We only need the state
+            // machine if you need to bind properties or arguments.
+            if (_actionDescriptor.BoundProperties.Count == 0 && (_handler == null || _handler.Parameters.Count == 0))
+            {
+                return Task.CompletedTask;
+            }
+
+            return BindArgumentsCoreAsync();
+        }
+
+        private async Task BindArgumentsCoreAsync()
+        {
+            if (CacheEntry.PropertyBinder != null)
+            {
+                await CacheEntry.PropertyBinder(_pageContext, _instance);
+            }
+
+            if (_handler == null)
+            {
+                return;
+            }
+            
+            var valueProvider = await CompositeValueProvider.CreateAsync(_pageContext, _pageContext.ValueProviderFactories);
+
+            for (var i = 0; i < _handler.Parameters.Count; i++)
+            {
+                var parameter = _handler.Parameters[i];
+
+                var result = await _parameterBinder.BindModelAsync(
+                    _pageContext,
+                    valueProvider,
+                    parameter,
+                    value: null);
+
+                if (result.IsModelSet)
+                {
+                    _arguments[parameter.Name] = result.Model;
+                }
+            }
+        }
+
+        private static object[] PrepareArguments(
+            IDictionary<string, object> argumentsInDictionary,
+            HandlerMethodDescriptor handler)
+        {
+            if (handler.Parameters.Count == 0)
+            {
+                return null;
+            }
+
+            var arguments = new object[handler.Parameters.Count];
+            for (var i = 0; i < arguments.Length; i++)
+            {
+                var parameter = handler.Parameters[i];
+
+                if (argumentsInDictionary.TryGetValue(parameter.ParameterInfo.Name, out var value))
+                {
+                    // Do nothing, already set the value.
+                }
+                else if (parameter.ParameterInfo.HasDefaultValue)
+                {
+                    value = parameter.ParameterInfo.DefaultValue;
+                }
+                else if (parameter.ParameterInfo.ParameterType.IsValueType)
+                {
+                    value = Activator.CreateInstance(parameter.ParameterInfo.ParameterType);
+                }
+
+                arguments[i] = value;
+            }
+
+            return arguments;
+        }
+
+        private async Task InvokeHandlerMethodAsync()
+        {
+            var handler = _handler;
+            if (_handler != null)
+            {
+                var arguments = PrepareArguments(_arguments, handler);
+
+                Func<object, object[], Task<IActionResult>> executor = null;
+                for (var i = 0; i < _actionDescriptor.HandlerMethods.Count; i++)
+                {
+                    if (object.ReferenceEquals(handler, _actionDescriptor.HandlerMethods[i]))
+                    {
+                        executor = CacheEntry.Executors[i];
+                        break;
+                    }
+                }
+                
+                _diagnosticSource.BeforeHandlerMethod(_pageContext, handler, _arguments, _instance);
+                _logger.ExecutingHandlerMethod(_pageContext, handler, arguments);
+
+                try
+                {
+                    _result = await executor(_instance, arguments);
+                    _logger.ExecutedHandlerMethod(_pageContext, handler, _result);
+                }
+                finally
+                {
+                    _diagnosticSource.AfterHandlerMethod(_pageContext, handler, _arguments, _instance, _result);
+                }
+            }
+
+            // Pages have an implicit 'return Page()' even without a handler method.
+            if (_result == null)
+            {
+                _result = new PageResult();
+            }
+
+            // We also have some special initialization we need to do for PageResult.
+            if (_result is PageResult pageResult)
+            {
+                // If we used a PageModel then the Page isn't initialized yet.
+                if (_viewContext == null)
+                {
+                    _viewContext = new ViewContext(
+                        _pageContext,
+                        NullView.Instance,
+                        _pageContext.ViewData,
+                        _tempDataFactory.GetTempData(_pageContext.HttpContext),
+                        TextWriter.Null,
+                        _htmlHelperOptions);
+                }
+
+                if (_page == null)
+                {
+                    _page = (Page)CacheEntry.PageFactory(_pageContext, _viewContext);
+                }
+
+                pageResult.Page = _page;
+                pageResult.ViewData = pageResult.ViewData ?? _pageContext.ViewData;
             }
         }
 
         private Task Next(ref State next, ref Scope scope, ref object state, ref bool isCompleted)
         {
-            var diagnosticSource = _diagnosticSource;
-            var logger = _logger;
-
             switch (next)
             {
-                case State.ResourceInnerBegin:
+                case State.PageBegin:
                     {
-                        goto case State.ExceptionBegin;
+                        _instance = CreateInstance();
+
+                        goto case State.PageSelectHandlerBegin;
                     }
 
-                case State.ExceptionBegin:
+                case State.PageSelectHandlerBegin:
                     {
                         _cursor.Reset();
-                        goto case State.ExceptionNext;
+
+                        _handler = SelectHandler();
+
+                        goto case State.PageSelectHandlerNext;
                     }
 
-                case State.ExceptionNext:
+                case State.PageSelectHandlerNext:
+
+                    var currentSelector = _cursor.GetNextFilter<IPageFilter, IAsyncPageFilter>();
+                    if (currentSelector.FilterAsync != null)
                     {
-                        var current = _cursor.GetNextFilter<IExceptionFilter, IAsyncExceptionFilter>();
+                        if (_handlerSelectedContext == null)
+                        {
+                            _handlerSelectedContext = new PageHandlerSelectedContext(_pageContext, _filters, _instance)
+                            {
+                                HandlerMethod = _handler,
+                            };
+                        }
+
+                        state = currentSelector.FilterAsync;
+                        goto case State.PageSelectHandlerAsyncBegin;
+                    }
+                    else if (currentSelector.Filter != null)
+                    {
+                        if (_handlerSelectedContext == null)
+                        {
+                            _handlerSelectedContext = new PageHandlerSelectedContext(_pageContext, _filters, _instance)
+                            {
+                                HandlerMethod = _handler,
+                            };
+                        }
+
+                        state = currentSelector.Filter;
+                        goto case State.PageSelectHandlerSync;
+                    }
+                    else
+                    {
+                        goto case State.PageSelectHandlerEnd;
+                    }
+
+                case State.PageSelectHandlerAsyncBegin:
+                    {
+                        Debug.Assert(state != null);
+                        Debug.Assert(_handlerSelectedContext != null);
+
+                        var filter = (IAsyncPageFilter)state;
+                        var handlerSelectedContext = _handlerSelectedContext;
+
+                        _diagnosticSource.BeforeOnPageHandlerSelection(handlerSelectedContext, filter);
+
+                        var task = filter.OnPageHandlerSelectionAsync(handlerSelectedContext);
+                        if (task.Status != TaskStatus.RanToCompletion)
+                        {
+                            next = State.PageSelectHandlerAsyncEnd;
+                            return task;
+                        }
+
+                        goto case State.PageSelectHandlerAsyncEnd;
+                    }
+
+                case State.PageSelectHandlerAsyncEnd:
+                    {
+                        Debug.Assert(state != null);
+                        Debug.Assert(_handlerSelectedContext != null);
+
+                        var filter = (IAsyncPageFilter)state;
+
+                        _diagnosticSource.AfterOnPageHandlerSelection(_handlerSelectedContext, filter);
+
+                        goto case State.PageSelectHandlerNext;
+                    }
+
+                case State.PageSelectHandlerSync:
+                    {
+                        Debug.Assert(state != null);
+                        Debug.Assert(_handlerSelectedContext != null);
+
+                        var filter = (IPageFilter)state;
+                        var handlerSelectedContext = _handlerSelectedContext;
+
+                        _diagnosticSource.BeforeOnPageHandlerSelected(handlerSelectedContext, filter);
+
+                        filter.OnPageHandlerSelected(handlerSelectedContext);
+
+                        _diagnosticSource.AfterOnPageHandlerSelected(handlerSelectedContext, filter);
+
+                        goto case State.PageSelectHandlerNext;
+                    }
+
+                case State.PageSelectHandlerEnd:
+                    {
+                        if (_handlerSelectedContext != null)
+                        {
+                            _handler = _handlerSelectedContext.HandlerMethod;
+                        }
+
+                        _arguments = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+                        _cursor.Reset();
+
+                        var task = BindArgumentsAsync();
+                        if (task.Status != TaskStatus.RanToCompletion)
+                        {
+                            next = State.PageNext;
+                            return task;
+                        }
+
+                        goto case State.PageNext;
+                    }
+
+                case State.PageNext:
+                    {
+                        var current = _cursor.GetNextFilter<IPageFilter, IAsyncPageFilter>();
                         if (current.FilterAsync != null)
                         {
+                            if (_handlerExecutingContext == null)
+                            {
+                                _handlerExecutingContext = new PageHandlerExecutingContext(_pageContext, _filters, _handler, _arguments, _instance);
+                            }
+
                             state = current.FilterAsync;
-                            goto case State.ExceptionAsyncBegin;
+                            goto case State.PageAsyncBegin;
                         }
                         else if (current.Filter != null)
                         {
+                            if (_handlerExecutingContext == null)
+                            {
+                                _handlerExecutingContext = new PageHandlerExecutingContext(_pageContext, _filters,_handler, _arguments, _instance);
+                            }
+
                             state = current.Filter;
-                            goto case State.ExceptionSyncBegin;
-                        }
-                        else if (scope == Scope.Exception)
-                        {
-                            // All exception filters are on the stack already - so execute the 'inside'.
-                            goto case State.ExceptionInside;
+                            goto case State.PageSyncBegin;
                         }
                         else
                         {
-                            // There are no exception filters - so jump right to 'inside'.
-                            Debug.Assert(scope == Scope.Resource);
-                            goto case State.PageBegin;
+                            goto case State.PageInside;
                         }
                     }
 
-                case State.ExceptionAsyncBegin:
+                case State.PageAsyncBegin:
                     {
-                        var task = InvokeNextExceptionFilterAsync();
+                        Debug.Assert(state != null);
+                        Debug.Assert(_handlerExecutingContext != null);
+
+                        var filter = (IAsyncPageFilter)state;
+                        var handlerExecutingContext = _handlerExecutingContext;
+
+                        _diagnosticSource.BeforeOnPageHandlerExecution(handlerExecutingContext, filter);
+
+                        var task = filter.OnPageHandlerExecutionAsync(handlerExecutingContext, InvokeNextPageFilterAwaitedAsync);
                         if (task.Status != TaskStatus.RanToCompletion)
                         {
-                            next = State.ExceptionAsyncResume;
+                            next = State.PageAsyncEnd;
                             return task;
                         }
 
-                        goto case State.ExceptionAsyncResume;
+                        goto case State.PageAsyncEnd;
                     }
 
-                case State.ExceptionAsyncResume:
+                case State.PageAsyncEnd:
                     {
                         Debug.Assert(state != null);
+                        Debug.Assert(_handlerExecutingContext != null);
 
-                        var filter = (IAsyncExceptionFilter)state;
-                        var exceptionContext = _exceptionContext;
+                        var filter = (IAsyncPageFilter)state;
 
-                        // When we get here we're 'unwinding' the stack of exception filters. If we have an unhandled exception,
-                        // we'll call the filter. Otherwise there's nothing to do.
-                        if (exceptionContext?.Exception != null && !exceptionContext.ExceptionHandled)
+                        if (_handlerExecutedContext == null)
                         {
-                            _diagnosticSource.BeforeOnExceptionAsync(exceptionContext, filter);
+                            // If we get here then the filter didn't call 'next' indicating a short circuit.
+                            _logger.PageFilterShortCircuited(filter);
 
-                            var task = filter.OnExceptionAsync(exceptionContext);
-                            if (task.Status != TaskStatus.RanToCompletion)
+                            _handlerExecutedContext = new PageHandlerExecutedContext(
+                                _pageContext,
+                                _filters,
+                                _handler,
+                                _instance)
                             {
-                                next = State.ExceptionAsyncEnd;
-                                return task;
-                            }
-
-                            goto case State.ExceptionAsyncEnd;
+                                Canceled = true,
+                                Result = _handlerExecutingContext.Result,
+                            };
                         }
 
-                        goto case State.ExceptionEnd;
+                        _diagnosticSource.AfterOnPageHandlerExecution(_handlerExecutedContext, filter);
+
+                        goto case State.PageEnd;
                     }
 
-                case State.ExceptionAsyncEnd:
+                case State.PageSyncBegin:
                     {
                         Debug.Assert(state != null);
-                        Debug.Assert(_exceptionContext != null);
+                        Debug.Assert(_handlerExecutingContext != null);
 
-                        var filter = (IAsyncExceptionFilter)state;
-                        var exceptionContext = _exceptionContext;
+                        var filter = (IPageFilter)state;
+                        var handlerExecutingContext = _handlerExecutingContext;
 
-                        _diagnosticSource.AfterOnExceptionAsync(exceptionContext, filter);
+                        _diagnosticSource.BeforeOnPageHandlerExecuting(handlerExecutingContext, filter);
 
-                        if (exceptionContext.Exception == null || exceptionContext.ExceptionHandled)
+                        filter.OnPageHandlerExecuting(handlerExecutingContext);
+
+                        _diagnosticSource.AfterOnPageHandlerExecuting(handlerExecutingContext, filter);
+
+                        if (handlerExecutingContext.Result != null)
                         {
-                            _logger.ExceptionFilterShortCircuited(filter);
+                            // Short-circuited by setting a result.
+                            _logger.PageFilterShortCircuited(filter);
+
+                            _handlerExecutedContext = new PageHandlerExecutedContext(
+                                _pageContext,
+                                _filters,
+                                _handler,
+                                _instance)
+                            {
+                                Canceled = true,
+                                Result = _handlerExecutingContext.Result,
+                            };
+
+                            goto case State.PageEnd;
                         }
 
-                        goto case State.ExceptionEnd;
-                    }
-
-                case State.ExceptionSyncBegin:
-                    {
-                        var task = InvokeNextExceptionFilterAsync();
+                        var task = InvokeNextPageFilterAsync();
                         if (task.Status != TaskStatus.RanToCompletion)
                         {
-                            next = State.ExceptionSyncEnd;
+                            next = State.PageSyncEnd;
                             return task;
                         }
 
-                        goto case State.ExceptionSyncEnd;
+                        goto case State.PageSyncEnd;
                     }
 
-                case State.ExceptionSyncEnd:
+                case State.PageSyncEnd:
                     {
                         Debug.Assert(state != null);
+                        Debug.Assert(_handlerExecutingContext != null);
+                        Debug.Assert(_handlerExecutedContext != null);
 
-                        var filter = (IExceptionFilter)state;
-                        var exceptionContext = _exceptionContext;
+                        var filter = (IPageFilter)state;
+                        var handlerExecutedContext = _handlerExecutedContext;
 
-                        // When we get here we're 'unwinding' the stack of exception filters. If we have an unhandled exception,
-                        // we'll call the filter. Otherwise there's nothing to do.
-                        if (exceptionContext?.Exception != null && !exceptionContext.ExceptionHandled)
-                        {
-                            _diagnosticSource.BeforeOnException(exceptionContext, filter);
+                        _diagnosticSource.BeforeOnPageHandlerExecuted(handlerExecutedContext, filter);
 
-                            filter.OnException(exceptionContext);
+                        filter.OnPageHandlerExecuted(handlerExecutedContext);
 
-                            _diagnosticSource.AfterOnException(exceptionContext, filter);
+                        _diagnosticSource.AfterOnPageHandlerExecuted(handlerExecutedContext, filter);
 
-                            if (exceptionContext.Exception == null || exceptionContext.ExceptionHandled)
-                            {
-                                _logger.ExceptionFilterShortCircuited(filter);
-                            }
-                        }
-
-                        goto case State.ExceptionEnd;
+                        goto case State.PageEnd;
                     }
 
-                case State.ExceptionInside:
+                case State.PageInside:
                     {
-                        goto case State.PageBegin;
-                    }
-
-                case State.ExceptionShortCircuit:
-                    {
-                        Debug.Assert(state != null);
-                        Debug.Assert(_exceptionContext != null);
-
-                        if (scope == Scope.Resource)
-                        {
-                            Debug.Assert(_exceptionContext.Result != null);
-                            _result = _exceptionContext.Result;
-                        }
-
-                        var task = InvokeResultAsync(_exceptionContext.Result);
+                        var task = InvokeHandlerMethodAsync();
                         if (task.Status != TaskStatus.RanToCompletion)
                         {
-                            next = State.ResourceInnerEnd;
+                            next = State.PageEnd;
                             return task;
                         }
 
-                        goto case State.ResourceInnerEnd;
-                    }
-
-                case State.ExceptionEnd:
-                    {
-                        var exceptionContext = _exceptionContext;
-
-                        if (scope == Scope.Exception)
-                        {
-                            isCompleted = true;
-                            return TaskCache.CompletedTask;
-                        }
-
-                        if (exceptionContext != null)
-                        {
-                            if (exceptionContext.Result != null && !exceptionContext.ExceptionHandled)
-                            {
-                                goto case State.ExceptionShortCircuit;
-                            }
-
-                            Rethrow(exceptionContext);
-                        }
-
-                        goto case State.ResourceInnerEnd;
-                    }
-
-                case State.PageBegin:
-                    {
-                        var pageContext = _pageContext;
-
-                        _cursor.Reset();
-
-                        next = State.PageEnd;
-                        return ExecutePageAsync();
+                        goto case State.PageEnd;
                     }
 
                 case State.PageEnd:
                     {
-                        if (scope == Scope.Exception)
+                        if (scope == Scope.Page)
                         {
-                            // If we're inside an exception filter, let's allow those filters to 'unwind' before
-                            // the result.
+                            if (_handlerExecutedContext == null)
+                            {
+                                _handlerExecutedContext = new PageHandlerExecutedContext(_pageContext, _filters, _handler, _instance)
+                                {
+                                    Result = _result,
+                                };
+                            }
+
                             isCompleted = true;
-                            return TaskCache.CompletedTask;
+                            return Task.CompletedTask;
                         }
 
-                        Debug.Assert(scope == Scope.Resource);
-                        goto case State.ResourceInnerEnd;
-                    }
+                        var handlerExecutedContext = _handlerExecutedContext;
+                        Rethrow(handlerExecutedContext);
 
-                case State.ResourceInnerEnd:
-                    {
+                        if (handlerExecutedContext != null)
+                        {
+                            _result = handlerExecutedContext.Result;
+                        }
+
                         isCompleted = true;
-                        return TaskCache.CompletedTask;
+                        return Task.CompletedTask;
                     }
 
                 default:
@@ -304,141 +583,13 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
             }
         }
 
-        private async Task ExecutePageAsync()
-        {
-            var actionDescriptor = _pageContext.ActionDescriptor;
-            _page = (Page)CacheEntry.PageFactory(_pageContext);
-            _pageContext.Page = _page;
-            _pageContext.ValueProviderFactories = _valueProviderFactories;
-
-            IRazorPage[] viewStarts;
-
-            if (CacheEntry.ViewStartFactories == null || CacheEntry.ViewStartFactories.Count == 0)
-            {
-                viewStarts = Array.Empty<IRazorPage>();
-            }
-            else
-            {
-                viewStarts = new IRazorPage[CacheEntry.ViewStartFactories.Count];
-                for (var i = 0; i < viewStarts.Length; i++)
-                {
-                    var pageFactory = CacheEntry.ViewStartFactories[i];
-                    viewStarts[i] = pageFactory();
-                }
-            }
-            _pageContext.ViewStarts = viewStarts;
-
-            if (actionDescriptor.ModelTypeInfo == actionDescriptor.PageTypeInfo)
-            {
-                _model = _page;
-            }
-            else
-            {
-                _model = CacheEntry.ModelFactory(_pageContext);
-            }
-
-            if (_model != null)
-            {
-                _pageContext.ViewData.Model = _model;
-            }
-
-            if (CacheEntry.PropertyBinder != null)
-            {
-                await CacheEntry.PropertyBinder(_page, _model);
-            }
-
-            // This is a workaround for not yet having proper filter for Pages.
-            PageSaveTempDataPropertyFilter propertyFilter = null;
-            for (var i = 0; i < _filters.Length; i++)
-            {
-                propertyFilter = _filters[i] as PageSaveTempDataPropertyFilter;
-                if (propertyFilter != null)
-                {
-                    break;
-                }
-            }
-
-            if (propertyFilter != null)
-            {
-                object subject = _page;
-
-                if (_model != null)
-                {
-                    subject = _model;
-                }
-
-                propertyFilter.Subject = subject;
-                propertyFilter.ApplyTempDataChanges(_pageContext.HttpContext);
-            }
-
-            IActionResult result = null;
-
-            var handler = _selector.Select(_pageContext);
-            if (handler != null)
-            {
-                var arguments = await GetArguments(handler);
-
-                Func<object, object[], Task<IActionResult>> executor = null;
-                for (var i = 0; i < actionDescriptor.HandlerMethods.Count; i++)
-                {
-                    if (object.ReferenceEquals(handler, actionDescriptor.HandlerMethods[i]))
-                    {
-                        executor = CacheEntry.Executors[i];
-                        break;
-                    }
-                }
-
-                var instance = actionDescriptor.ModelTypeInfo == actionDescriptor.HandlerTypeInfo ? _model : _page;
-                result = await executor(instance, arguments);
-            }
-
-            if (result == null)
-            {
-                result = new PageResult(_page);
-            }
-
-            await result.ExecuteResultAsync(_pageContext);
-        }
-
-        private async Task<object[]> GetArguments(HandlerMethodDescriptor handler)
-        {
-            var arguments = new object[handler.Parameters.Count];
-            var valueProvider = await CompositeValueProvider.CreateAsync(_pageContext, _pageContext.ValueProviderFactories);
-
-            for (var i = 0; i < handler.Parameters.Count; i++)
-            {
-                var parameter = handler.Parameters[i];
-
-                var result = await _parameterBinder.BindModelAsync(
-                    _page.PageContext,
-                    valueProvider,
-                    parameter,
-                    value: null);
-
-                if (result.IsModelSet)
-                {
-                    arguments[i] = result.Model;
-                }
-                else if (parameter.ParameterInfo.HasDefaultValue)
-                {
-                    arguments[i] = parameter.ParameterInfo.DefaultValue;
-                }
-                else if (parameter.ParameterType.GetTypeInfo().IsValueType)
-                {
-                    arguments[i] = Activator.CreateInstance(parameter.ParameterType);
-                }
-            }
-
-            return arguments;
-        }
-
-        private async Task InvokeNextExceptionFilterAsync()
+        private async Task InvokeNextPageFilterAsync()
         {
             try
             {
-                var next = State.ExceptionNext;
+                var next = State.PageNext;
                 var state = (object)null;
-                var scope = Scope.Exception;
+                var scope = Scope.Page;
                 var isCompleted = false;
                 while (!isCompleted)
                 {
@@ -447,14 +598,37 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
             }
             catch (Exception exception)
             {
-                _exceptionContext = new ExceptionContext(_actionContext, _filters)
+                _handlerExecutedContext = new PageHandlerExecutedContext(_pageContext, _filters, _handler, _instance)
                 {
                     ExceptionDispatchInfo = ExceptionDispatchInfo.Capture(exception),
                 };
             }
+
+            Debug.Assert(_handlerExecutedContext != null);
         }
 
-        private static void Rethrow(ExceptionContext context)
+        private async Task<PageHandlerExecutedContext> InvokeNextPageFilterAwaitedAsync()
+        {
+            Debug.Assert(_handlerExecutingContext != null);
+            if (_handlerExecutingContext.Result != null)
+            {
+                // If we get here, it means that an async filter set a result AND called next(). This is forbidden.
+                var message = Resources.FormatAsyncPageFilter_InvalidShortCircuit(
+                    typeof(IAsyncPageFilter).Name,
+                    nameof(PageHandlerExecutingContext.Result),
+                    typeof(PageHandlerExecutingContext).Name,
+                    typeof(PageHandlerExecutionDelegate).Name);
+
+                throw new InvalidOperationException(message);
+            }
+
+            await InvokeNextPageFilterAsync();
+
+            Debug.Assert(_handlerExecutedContext != null);
+            return _handlerExecutedContext;
+        }
+
+        private static void Rethrow(PageHandlerExecutedContext context)
         {
             if (context == null)
             {
@@ -479,27 +653,26 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
 
         private enum Scope
         {
-            Resource,
-            Exception,
+            Invoker,
             Page,
         }
 
         private enum State
         {
-            ResourceInnerBegin,
-            ExceptionBegin,
-            ExceptionNext,
-            ExceptionAsyncBegin,
-            ExceptionAsyncResume,
-            ExceptionAsyncEnd,
-            ExceptionSyncBegin,
-            ExceptionSyncEnd,
-            ExceptionInside,
-            ExceptionShortCircuit,
-            ExceptionEnd,
             PageBegin,
+            PageSelectHandlerBegin,
+            PageSelectHandlerNext,
+            PageSelectHandlerAsyncBegin,
+            PageSelectHandlerAsyncEnd,
+            PageSelectHandlerSync,
+            PageSelectHandlerEnd,
+            PageNext,
+            PageAsyncBegin,
+            PageAsyncEnd,
+            PageSyncBegin,
+            PageSyncEnd,
+            PageInside,
             PageEnd,
-            ResourceInnerEnd,
         }
     }
 }

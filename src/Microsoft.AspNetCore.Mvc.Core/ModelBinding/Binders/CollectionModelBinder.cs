@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -182,8 +181,6 @@ namespace Microsoft.AspNetCore.Mvc.ModelBinding.Binders
                     bindingContext.ValueProvider
                 };
 
-                object boundValue = null;
-
                 using (bindingContext.EnterNestedScope(
                     elementMetadata,
                     fieldName: bindingContext.FieldName,
@@ -194,7 +191,7 @@ namespace Microsoft.AspNetCore.Mvc.ModelBinding.Binders
 
                     if (bindingContext.Result.IsModelSet)
                     {
-                        boundValue = bindingContext.Result.Model;
+                        var boundValue = bindingContext.Result.Model;
                         boundCollection.Add(ModelBindingHelper.CastOrDefault<TElement>(boundValue));
                     }
                 }
@@ -353,32 +350,6 @@ namespace Microsoft.AspNetCore.Mvc.ModelBinding.Binders
                     targetCollection.Add(element);
                 }
             }
-        }
-
-        private static object[] RawValueToObjectArray(object rawValue)
-        {
-            // precondition: rawValue is not null
-
-            // Need to special-case String so it's not caught by the IEnumerable check which follows
-            if (rawValue is string)
-            {
-                return new[] { rawValue };
-            }
-
-            var rawValueAsObjectArray = rawValue as object[];
-            if (rawValueAsObjectArray != null)
-            {
-                return rawValueAsObjectArray;
-            }
-
-            var rawValueAsEnumerable = rawValue as IEnumerable;
-            if (rawValueAsEnumerable != null)
-            {
-                return rawValueAsEnumerable.Cast<object>().ToArray();
-            }
-
-            // fallback
-            return new[] { rawValue };
         }
 
         private static IEnumerable<string> GetIndexNamesFromValueProviderResult(ValueProviderResult valueProviderResult)

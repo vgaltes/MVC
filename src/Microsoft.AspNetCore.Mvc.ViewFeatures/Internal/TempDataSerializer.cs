@@ -45,7 +45,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
 
         public IDictionary<string, object> Deserialize(byte[] value)
         {
-            Dictionary<string, object> tempDataDictionary = null;
+            Dictionary<string, object> tempDataDictionary;
 
             using (var memoryStream = new MemoryStream(value))
             using (var reader = new BsonDataReader(memoryStream))
@@ -67,8 +67,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                 if (jArrayValue != null && jArrayValue.Count > 0)
                 {
                     var arrayType = jArrayValue[0].Type;
-                    Type returnType;
-                    if (_tokenTypeLookup.TryGetValue(arrayType, out returnType))
+                    if (_tokenTypeLookup.TryGetValue(arrayType, out var returnType))
                     {
                         var arrayConverter = _arrayConverters.GetOrAdd(returnType, type =>
                         {
@@ -95,8 +94,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                     }
 
                     var jTokenType = jObjectValue.Properties().First().Value.Type;
-                    Type valueType;
-                    if (_tokenTypeLookup.TryGetValue(jTokenType, out valueType))
+                    if (_tokenTypeLookup.TryGetValue(jTokenType, out var valueType))
                     {
                         var dictionaryConverter = _dictionaryConverters.GetOrAdd(valueType, type =>
                         {
@@ -114,9 +112,8 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                         throw new InvalidOperationException(message);
                     }
                 }
-                else if (item.Value is long)
+                else if (item.Value is long longValue)
                 {
-                    var longValue = (long)item.Value;
                     if (longValue >= int.MinValue && longValue <= int.MaxValue)
                     {
                         // BsonReader casts all ints to longs. We'll attempt to work around this by force converting
@@ -126,7 +123,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                 }
             }
 
-            return convertedDictionary ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            return convertedDictionary;
         }
 
         public byte[] Serialize(IDictionary<string, object> values)

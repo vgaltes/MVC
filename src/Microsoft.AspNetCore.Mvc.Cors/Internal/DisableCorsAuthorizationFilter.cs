@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.Mvc.Cors.Internal
@@ -17,15 +16,9 @@ namespace Microsoft.AspNetCore.Mvc.Cors.Internal
     public class DisableCorsAuthorizationFilter : ICorsAuthorizationFilter
     {
         /// <inheritdoc />
-        public int Order
-        {
-            get
-            {
-                // Since clients' preflight requests would not have data to authenticate requests, this
-                // filter must run before any other authorization filters.
-                return int.MinValue + 100;
-            }
-        }
+        // Since clients' preflight requests would not have data to authenticate requests, this
+        // filter must run before any other authorization filters.
+        public int Order => int.MinValue + 100;
 
         /// <inheritdoc />
         public Task OnAuthorizationAsync(AuthorizationFilterContext context)
@@ -48,7 +41,7 @@ namespace Microsoft.AspNetCore.Mvc.Cors.Internal
             }
 
             // Let the action be executed.
-            return TaskCache.CompletedTask;
+            return Task.CompletedTask;
         }
     }
 }

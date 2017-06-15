@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Microsoft.AspNetCore.Mvc.Core;
 
 namespace Microsoft.AspNetCore.Mvc.Formatters.Internal
 {
@@ -38,8 +37,7 @@ namespace Microsoft.AspNetCore.Mvc.Formatters.Internal
                 {
                     var startCharIndex = charIndex;
 
-                    MediaTypeSegmentWithQuality output;
-                    if (TryParseValue(value, ref charIndex, out output))
+                    if (TryParseValue(value, ref charIndex, out var output))
                     {
                         // The entry may not contain an actual value, like Accept: application/json, , */*
                         if (output.MediaType.HasValue)
@@ -71,8 +69,7 @@ namespace Microsoft.AspNetCore.Mvc.Formatters.Internal
                 return true;
             }
 
-            var separatorFound = false;
-            var currentIndex = GetNextNonEmptyOrWhitespaceIndex(value, index, out separatorFound);
+            var currentIndex = GetNextNonEmptyOrWhitespaceIndex(value, index, out var separatorFound);
 
             if (currentIndex == value.Length)
             {

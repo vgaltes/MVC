@@ -74,10 +74,7 @@ namespace Microsoft.AspNetCore.Mvc.Razor
         }
 
         /// <inheritdoc />
-        public string Path
-        {
-            get { return RazorPage.Path; }
-        }
+        public string Path => RazorPage.Path;
 
         /// <summary>
         /// Gets <see cref="IRazorPage"/> instance that the views executes on.
@@ -273,7 +270,6 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                 {
                     // This means we're writing to another buffer. Use MoveTo to combine them.
                     bodyWriter.Buffer.MoveTo(viewBufferTextWriter.Buffer);
-                    return;
                 }
             }
         }

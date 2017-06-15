@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Abstractions;
-using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,14 +18,14 @@ namespace Microsoft.AspNetCore.Mvc
     public class ForbidResultTest
     {
         [Fact]
-        public async Task ExecuteResultAsync_InvokesForbidAsyncOnAuthenticationManager()
+        public async Task ExecuteResultAsync_InvokesForbidAsyncOnAuthenticationService()
         {
             // Arrange
             var httpContext = new Mock<HttpContext>();
             var auth = new Mock<IAuthenticationService>();
             auth
-                .Setup(c => c.ChallengeAsync(httpContext.Object, "", null, ChallengeBehavior.Forbidden))
-                .Returns(TaskCache.CompletedTask)
+                .Setup(c => c.ForbidAsync(httpContext.Object, "", null))
+                .Returns(Task.CompletedTask)
                 .Verifiable();
             httpContext.Setup(c => c.RequestServices).Returns(CreateServices(auth.Object));
             var result = new ForbidResult("", null);
@@ -52,12 +51,12 @@ namespace Microsoft.AspNetCore.Mvc
             var authProperties = new AuthenticationProperties();
             var auth = new Mock<IAuthenticationService>();
             auth
-                .Setup(c => c.ChallengeAsync(httpContext.Object, "Scheme1", authProperties, ChallengeBehavior.Forbidden))
-                .Returns(TaskCache.CompletedTask)
+                .Setup(c => c.ForbidAsync(httpContext.Object, "Scheme1", authProperties))
+                .Returns(Task.CompletedTask)
                 .Verifiable();
             auth
-                .Setup(c => c.ChallengeAsync(httpContext.Object, "Scheme2", authProperties, ChallengeBehavior.Forbidden))
-                .Returns(TaskCache.CompletedTask)
+                .Setup(c => c.ForbidAsync(httpContext.Object, "Scheme2", authProperties))
+                .Returns(Task.CompletedTask)
                 .Verifiable();
             httpContext.Setup(c => c.RequestServices).Returns(CreateServices(auth.Object));
             var result = new ForbidResult(new[] { "Scheme1", "Scheme2" }, authProperties);
@@ -90,8 +89,8 @@ namespace Microsoft.AspNetCore.Mvc
             var httpContext = new Mock<HttpContext>();
             var auth = new Mock<IAuthenticationService>();
             auth
-                .Setup(c => c.ChallengeAsync(httpContext.Object, null, expected, ChallengeBehavior.Forbidden))
-                .Returns(TaskCache.CompletedTask)
+                .Setup(c => c.ForbidAsync(httpContext.Object, null, expected))
+                .Returns(Task.CompletedTask)
                 .Verifiable();
             httpContext.Setup(c => c.RequestServices).Returns(CreateServices(auth.Object));
             var result = new ForbidResult(expected);
@@ -118,8 +117,8 @@ namespace Microsoft.AspNetCore.Mvc
             var httpContext = new Mock<HttpContext>();
             var auth = new Mock<IAuthenticationService>();
             auth
-                .Setup(c => c.ChallengeAsync(httpContext.Object, null, expected, ChallengeBehavior.Forbidden))
-                .Returns(TaskCache.CompletedTask)
+                .Setup(c => c.ForbidAsync(httpContext.Object, null, expected))
+                .Returns(Task.CompletedTask)
                 .Verifiable();
             httpContext.Setup(c => c.RequestServices).Returns(CreateServices(auth.Object));
             var result = new ForbidResult(expected)

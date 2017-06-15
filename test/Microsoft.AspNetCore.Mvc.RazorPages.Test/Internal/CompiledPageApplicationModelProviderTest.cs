@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.AspNetCore.Mvc.ApplicationParts;
+using Microsoft.AspNetCore.Mvc.Razor.Compilation;
+using Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure;
 using Xunit;
 
 namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
@@ -15,12 +17,12 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
         public void OnProvidersExecuting_AddsModelsForCompiledViews()
         {
             // Arrange
-            var info = new[]
+            var descriptors = new[]
             {
-                new CompiledPageInfo("/Pages/About.cshtml", typeof(object), routePrefix: string.Empty),
-                new CompiledPageInfo("/Pages/Home.cshtml", typeof(object), "some-prefix"),
+                GetDescriptor("/Pages/About.cshtml"),
+                GetDescriptor("/Pages/Home.cshtml", "some-prefix"),
             };
-            var provider = new TestCompiledPageApplicationModelProvider(info, new RazorPagesOptions());
+            var provider = new TestCompiledPageApplicationModelProvider(descriptors, new RazorPagesOptions());
             var context = new PageApplicationModelProviderContext();
 
             // Act
@@ -31,29 +33,29 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
                 result =>
                 {
                     Assert.Equal("/Pages/About.cshtml", result.RelativePath);
-                    Assert.Equal("/Pages/About", result.ViewEnginePath);
+                    Assert.Equal("/About", result.ViewEnginePath);
                     Assert.Collection(result.Selectors,
-                        selector => Assert.Equal("Pages/About", selector.AttributeRouteModel.Template));
+                        selector => Assert.Equal("About", selector.AttributeRouteModel.Template));
                 },
                 result =>
                 {
                     Assert.Equal("/Pages/Home.cshtml", result.RelativePath);
-                    Assert.Equal("/Pages/Home", result.ViewEnginePath);
+                    Assert.Equal("/Home", result.ViewEnginePath);
                     Assert.Collection(result.Selectors,
-                        selector => Assert.Equal("Pages/Home/some-prefix", selector.AttributeRouteModel.Template));
+                        selector => Assert.Equal("Home/some-prefix", selector.AttributeRouteModel.Template));
                 });
         }
 
         [Fact]
-        public void OnProvidersExecuting_AddsMultipleSelectorsForIndexPage()
+        public void OnProvidersExecuting_AddsMultipleSelectorsForIndexPage_WithIndexAtRoot()
         {
             // Arrange
-            var info = new[]
+            var descriptors = new[]
             {
-                new CompiledPageInfo("/Pages/Index.cshtml", typeof(object), routePrefix: string.Empty),
-                new CompiledPageInfo("/Pages/Admin/Index.cshtml", typeof(object), "some-template"),
+                GetDescriptor("/Pages/Index.cshtml"),
+                GetDescriptor("/Pages/Admin/Index.cshtml", "some-template"),
             };
-            var provider = new TestCompiledPageApplicationModelProvider(info, new RazorPagesOptions());
+            var provider = new TestCompiledPageApplicationModelProvider(descriptors, new RazorPagesOptions { RootDirectory = "/" });
             var context = new PageApplicationModelProviderContext();
 
             // Act
@@ -80,15 +82,50 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
         }
 
         [Fact]
+        public void OnProvidersExecuting_AddsMultipleSelectorsForIndexPage()
+        {
+            // Arrange
+            var descriptors = new[]
+            {
+                GetDescriptor("/Pages/Index.cshtml"),
+                GetDescriptor("/Pages/Admin/Index.cshtml", "some-template"),
+            };
+            var provider = new TestCompiledPageApplicationModelProvider(descriptors, new RazorPagesOptions());
+            var context = new PageApplicationModelProviderContext();
+
+            // Act
+            provider.OnProvidersExecuting(context);
+
+            // Assert
+            Assert.Collection(context.Results,
+                result =>
+                {
+                    Assert.Equal("/Pages/Index.cshtml", result.RelativePath);
+                    Assert.Equal("/Index", result.ViewEnginePath);
+                    Assert.Collection(result.Selectors,
+                        selector => Assert.Equal("Index", selector.AttributeRouteModel.Template),
+                        selector => Assert.Equal("", selector.AttributeRouteModel.Template));
+                },
+                result =>
+                {
+                    Assert.Equal("/Pages/Admin/Index.cshtml", result.RelativePath);
+                    Assert.Equal("/Admin/Index", result.ViewEnginePath);
+                    Assert.Collection(result.Selectors,
+                        selector => Assert.Equal("Admin/Index/some-template", selector.AttributeRouteModel.Template),
+                        selector => Assert.Equal("Admin/some-template", selector.AttributeRouteModel.Template));
+                });
+        }
+
+        [Fact]
         public void OnProvidersExecuting_ThrowsIfRouteTemplateHasOverridePattern()
         {
             // Arrange
-            var info = new[]
+            var descriptors = new[]
             {
-                new CompiledPageInfo("/Pages/Index.cshtml", typeof(object), routePrefix: string.Empty),
-                new CompiledPageInfo("/Pages/Home.cshtml", typeof(object), "/some-prefix"),
+                GetDescriptor("/Pages/Index.cshtml"),
+                GetDescriptor("/Pages/Home.cshtml", "/some-prefix"),
             };
-            var provider = new TestCompiledPageApplicationModelProvider(info, new RazorPagesOptions());
+            var provider = new TestCompiledPageApplicationModelProvider(descriptors, new RazorPagesOptions());
             var context = new PageApplicationModelProviderContext();
 
             // Act & Assert
@@ -97,17 +134,26 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
                 ex.Message);
         }
 
+        private static CompiledViewDescriptor GetDescriptor(string path, string prefix = "")
+        {
+            return new CompiledViewDescriptor
+            {
+                RelativePath = path,
+                ViewAttribute = new RazorPageAttribute(path, typeof(object), prefix),
+            };
+        }
+
         public class TestCompiledPageApplicationModelProvider : CompiledPageApplicationModelProvider
         {
-            private readonly IEnumerable<CompiledPageInfo> _info;
+            private readonly IEnumerable<CompiledViewDescriptor> _descriptors;
 
-            public TestCompiledPageApplicationModelProvider(IEnumerable<CompiledPageInfo> info, RazorPagesOptions options)
+            public TestCompiledPageApplicationModelProvider(IEnumerable<CompiledViewDescriptor> descriptors, RazorPagesOptions options)
                 : base(new ApplicationPartManager(), new TestOptionsManager<RazorPagesOptions>(options))
             {
-                _info = info;
+                _descriptors = descriptors;
             }
 
-            protected override IEnumerable<CompiledPageInfo> GetCompiledPages() => _info;
+            protected override IEnumerable<CompiledViewDescriptor> GetViewDescriptors(ApplicationPartManager applicationManager) => _descriptors;
         }
     }
 }

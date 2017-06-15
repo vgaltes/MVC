@@ -38,6 +38,7 @@ namespace Microsoft.AspNetCore.Mvc.Internal
 
         private static readonly Action<ILogger, object, Exception> _authorizationFailure;
         private static readonly Action<ILogger, object, Exception> _resourceFilterShortCircuit;
+        private static readonly Action<ILogger, object, Exception> _resultFilterShortCircuit;
         private static readonly Action<ILogger, object, Exception> _actionFilterShortCircuit;
         private static readonly Action<ILogger, object, Exception> _exceptionFilterShortCircuit;
 
@@ -127,6 +128,11 @@ namespace Microsoft.AspNetCore.Mvc.Internal
                 LogLevel.Debug,
                 4,
                 "Request was short circuited at resource filter '{ResourceFilter}'.");
+
+            _resultFilterShortCircuit = LoggerMessage.Define<object>(
+                LogLevel.Debug,
+                5,
+                "Request was short circuited at result filter '{ResultFilter}'.");
 
             _actionFilterShortCircuit = LoggerMessage.Define<object>(
                 LogLevel.Debug,
@@ -360,6 +366,13 @@ namespace Microsoft.AspNetCore.Mvc.Internal
             _resourceFilterShortCircuit(logger, filter, null);
         }
 
+        public static void ResultFilterShortCircuited(
+            this ILogger logger,
+            IFilterMetadata filter)
+        {
+            _resultFilterShortCircuit(logger, filter, null);
+        }
+
         public static void ExceptionFilterShortCircuited(
             this ILogger logger,
             IFilterMetadata filter)
@@ -539,13 +552,7 @@ namespace Microsoft.AspNetCore.Mvc.Internal
                 }
             }
 
-            public int Count
-            {
-                get
-                {
-                    return 2;
-                }
-            }
+            public int Count => 2;
 
             public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
             {

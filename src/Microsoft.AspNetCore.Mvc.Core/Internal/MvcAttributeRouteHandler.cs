@@ -4,7 +4,6 @@
 using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Core;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
@@ -15,10 +14,10 @@ namespace Microsoft.AspNetCore.Mvc.Internal
 {
     public class MvcAttributeRouteHandler : IRouter
     {
-        private IActionContextAccessor _actionContextAccessor;
-        private IActionInvokerFactory _actionInvokerFactory;
-        private IActionSelector _actionSelector;
-        private ILogger _logger;
+        private readonly IActionContextAccessor _actionContextAccessor;
+        private readonly IActionInvokerFactory _actionInvokerFactory;
+        private readonly IActionSelector _actionSelector;
+        private readonly ILogger _logger;
         private DiagnosticSource _diagnosticSource;
 
         public MvcAttributeRouteHandler(
@@ -79,7 +78,7 @@ namespace Microsoft.AspNetCore.Mvc.Internal
             if (actionDescriptor == null)
             {
                 _logger.NoActionsMatched(context.RouteData.Values);
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }
 
             foreach (var kvp in actionDescriptor.RouteValues)
@@ -111,7 +110,7 @@ namespace Microsoft.AspNetCore.Mvc.Internal
                 return invoker.InvokeAsync();
             };
 
-            return TaskCache.CompletedTask;
+            return Task.CompletedTask;
         }
     }
 }

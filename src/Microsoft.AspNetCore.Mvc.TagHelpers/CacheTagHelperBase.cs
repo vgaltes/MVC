@@ -23,9 +23,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
         private const string ExpiresOnAttributeName = "expires-on";
         private const string ExpiresAfterAttributeName = "expires-after";
         private const string ExpiresSlidingAttributeName = "expires-sliding";
-        private const string CacheKeyTokenSeparator = "||";
         private const string EnabledAttributeName = "enabled";
-        private static readonly char[] AttributeSeparator = new[] { ',' };
 
         /// <summary>
         /// Creates a new <see cref="CacheTagHelperBase"/>.
@@ -37,13 +35,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
         }
 
         /// <inheritdoc />
-        public override int Order
-        {
-            get
-            {
-                return -1000;
-            }
-        }
+        public override int Order => -1000;
 
         /// <summary>
         /// Gets the <see cref="System.Text.Encodings.Web.HtmlEncoder"/> which encodes the content to be cached.

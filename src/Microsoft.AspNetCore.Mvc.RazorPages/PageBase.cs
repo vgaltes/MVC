@@ -25,7 +25,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages
     /// A base class for a Razor page.
     /// </summary>
     [PagesBaseClass]
-    public abstract class PageBase : RazorPageBase, IRazorPage
+    public abstract class PageBase : RazorPageBase
     {
         private IObjectModelValidator _objectValidator;
         private IModelMetadataProvider _metadataProvider;
@@ -37,14 +37,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages
         public PageContext PageContext { get; set; }
 
         /// <inheritdoc />
-        public override ViewContext ViewContext
-        {
-            get => PageContext;
-            set
-            {
-                PageContext = (PageContext)value;
-            }
-        }
+        public override ViewContext ViewContext { get; set; }
 
         /// <summary>
         /// Gets the <see cref="Http.HttpContext"/>.
@@ -64,13 +57,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages
         /// <summary>
         /// Gets the <see cref="AspNetCore.Routing.RouteData"/> for the executing action.
         /// </summary>
-        public RouteData RouteData
-        {
-            get
-            {
-                return PageContext.RouteData;
-            }
-        }
+        public RouteData RouteData => PageContext.RouteData;
 
         /// <summary>
         /// Gets the <see cref="ModelStateDictionary"/>.
@@ -119,6 +106,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages
         /// <inheritdoc />
         public override void EnsureRenderedBodyOrSections()
         {
+            // This will never be called by MVC. MVC only calls this method on layout pages, and a Page can never be a layout page.
             throw new NotSupportedException();
         }
 
@@ -502,7 +490,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages
         /// Returning a <see cref="PageResult"/> from a page handler method is equivalent to returning void.
         /// The view associated with the page will be executed.
         /// </remarks>
-        public virtual PageResult Page() => new PageResult(this);
+        public virtual PageResult Page() => new PageResult();
 
         /// <summary>
         /// Creates a <see cref="RedirectResult"/> object that redirects to the specified <paramref name="url"/>.

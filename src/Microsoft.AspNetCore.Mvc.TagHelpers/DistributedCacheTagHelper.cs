@@ -3,7 +3,6 @@
 
 using System;
 using System.Text.Encodings.Web;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc.TagHelpers.Cache;
@@ -65,7 +64,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
                 throw new ArgumentNullException(nameof(output));
             }
 
-            IHtmlContent content = null;
+            IHtmlContent content;
 
             if (Enabled)
             {

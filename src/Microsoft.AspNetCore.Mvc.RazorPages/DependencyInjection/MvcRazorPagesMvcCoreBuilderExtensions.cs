@@ -2,10 +2,8 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Linq;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
-using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Razor;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -28,7 +26,6 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.AddRazorViewEngine();
 
-            AddFeatureProviders(builder);
             AddServices(builder.Services);
 
             return builder;
@@ -50,7 +47,6 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.AddRazorViewEngine();
 
-            AddFeatureProviders(builder);
             AddServices(builder.Services);
 
             builder.Services.Configure(setupAction);
@@ -80,20 +76,10 @@ namespace Microsoft.Extensions.DependencyInjection
             return builder;
         }
 
-        private static void AddFeatureProviders(IMvcCoreBuilder builder)
-        {
-            if (!builder.PartManager.FeatureProviders.OfType<CompiledPageFeatureProvider>().Any())
-            {
-                builder.PartManager.FeatureProviders.Add(new CompiledPageFeatureProvider());
-            }
-        }
-
         // Internal for testing.
         internal static void AddServices(IServiceCollection services)
         {
             // Options
-            services.TryAddEnumerable(
-                ServiceDescriptor.Transient<IConfigureOptions<RazorPagesOptions>, RazorPagesOptionsSetup>());
             services.TryAddEnumerable(
                 ServiceDescriptor.Transient<IConfigureOptions<RazorViewEngineOptions>, RazorPagesRazorViewEngineOptionsSetup>());
 
@@ -105,6 +91,8 @@ namespace Microsoft.Extensions.DependencyInjection
                 ServiceDescriptor.Singleton<IPageApplicationModelProvider, RazorProjectPageApplicationModelProvider>());
             services.TryAddEnumerable(
                 ServiceDescriptor.Singleton<IPageApplicationModelProvider, CompiledPageApplicationModelProvider>());
+            services.TryAddEnumerable(
+                ServiceDescriptor.Singleton<IPageApplicationModelProvider, PageFilterApplicationModelProvider>());
 
             services.TryAddEnumerable(
                 ServiceDescriptor.Singleton<IActionInvokerProvider, PageActionInvokerProvider>());
@@ -113,8 +101,8 @@ namespace Microsoft.Extensions.DependencyInjection
             services.TryAddSingleton<IPageModelActivatorProvider, DefaultPageModelActivatorProvider>();
             services.TryAddSingleton<IPageModelFactoryProvider, DefaultPageModelFactoryProvider>();
 
-            services.TryAddSingleton<IPageActivatorProvider, DefaultPageActivator>();
-            services.TryAddSingleton<IPageFactoryProvider, DefaultPageFactory>();
+            services.TryAddSingleton<IPageActivatorProvider, DefaultPageActivatorProvider>();
+            services.TryAddSingleton<IPageFactoryProvider, DefaultPageFactoryProvider>();
 
             services.TryAddSingleton<IPageLoader, DefaultPageLoader>();
             services.TryAddSingleton<IPageHandlerMethodSelector, DefaultPageHandlerMethodSelector>();

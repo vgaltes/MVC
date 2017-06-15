@@ -5,10 +5,8 @@ using System;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Razor.TagHelpers;
-using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Mvc.TagHelpers.Internal;
-using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -26,8 +24,6 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
         TagStructure = TagStructure.WithoutEndTag)]
     public class ImageTagHelper : UrlResolutionTagHelper
     {
-        private static readonly string Namespace = typeof(ImageTagHelper).Namespace;
-
         private const string AppendVersionAttributeName = "asp-append-version";
         private const string SrcAttributeName = "src";
 
@@ -52,13 +48,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
         }
 
         /// <inheritdoc />
-        public override int Order
-        {
-            get
-            {
-                return -1000;
-            }
-        }
+        public override int Order => -1000;
 
         /// <summary>
         /// Source of the image.

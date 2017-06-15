@@ -3,8 +3,6 @@
 
 using System;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Core;
 using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
@@ -58,10 +56,7 @@ namespace Microsoft.AspNetCore.Mvc
         /// </summary>
         public byte[] FileContents
         {
-            get
-            {
-                return _fileContents;
-            }
+            get => _fileContents;
             set
             {
                 if (value == null)

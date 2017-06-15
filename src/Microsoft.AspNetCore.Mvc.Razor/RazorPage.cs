@@ -3,13 +3,10 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using Microsoft.AspNetCore.Mvc.ViewFeatures;
 
 namespace Microsoft.AspNetCore.Mvc.Razor
 {
@@ -22,13 +19,6 @@ namespace Microsoft.AspNetCore.Mvc.Razor
         private bool _renderedBody;
         private bool _ignoreBody;
         private HashSet<string> _ignoredSections;
-
-        /// <summary>
-        /// Initializes a new instance of <see cref="RazorPage"/>.
-        /// </summary>
-        public RazorPage()
-        {
-        }
 
         /// <summary>
         /// An <see cref="HttpContext"/> representing the current request execution.
@@ -193,11 +183,10 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                 throw new InvalidOperationException(message);
             }
 
-            RenderAsyncDelegate renderDelegate;
-            if (PreviousSectionWriters.TryGetValue(sectionName, out renderDelegate))
+            if (PreviousSectionWriters.TryGetValue(sectionName, out var renderDelegate))
             {
                 _renderedSections.Add(sectionName);
-                
+
                 await renderDelegate();
 
                 // Return a token value that allows the Write call that wraps the RenderSection \ RenderSectionAsync
@@ -283,10 +272,6 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                 throw new InvalidOperationException(message);
             }
         }
-
-        // Working around an issue with ApiCheck tool
-        /// <inheritdoc />
-        public override Task<HtmlString> FlushAsync() => base.FlushAsync();
 
         public override void BeginContext(int position, int length, bool isLiteral)
         {

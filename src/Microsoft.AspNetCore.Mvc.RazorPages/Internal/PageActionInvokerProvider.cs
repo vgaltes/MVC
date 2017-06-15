@@ -6,7 +6,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -16,10 +15,10 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Razor;
 using Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.Mvc.ViewFeatures.Internal;
 using Microsoft.AspNetCore.Razor.Language;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
 {
@@ -146,14 +145,13 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
             PageActionInvokerCacheEntry cacheEntry,
             IFilterMetadata[] filters)
         {
-            var tempData = _tempDataFactory.GetTempData(actionContext.HttpContext);
-            var pageContext = new PageContext(
-                actionContext,
-                new ViewDataDictionary(_modelMetadataProvider, actionContext.ModelState),
-                tempData,
-                _htmlHelperOptions);
-
-            pageContext.ActionDescriptor = cacheEntry.ActionDescriptor;
+            var pageContext = new PageContext(actionContext)
+            {
+                ActionDescriptor = cacheEntry.ActionDescriptor,
+                ValueProviderFactories = new CopyOnWriteList<IValueProviderFactory>(_valueProviderFactories),
+                ViewData = cacheEntry.ViewDataFactory(_modelMetadataProvider, actionContext.ModelState),
+                ViewStartFactories = cacheEntry.ViewStartFactories.ToList(),
+            };
 
             return new PageActionInvoker(
                 _selector,
@@ -161,9 +159,10 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
                 _logger,
                 pageContext,
                 filters,
-                new CopyOnWriteList<IValueProviderFactory>(_valueProviderFactories),
                 cacheEntry,
-                _parameterBinder);
+                _parameterBinder,
+                _tempDataFactory,
+                _htmlHelperOptions);
         }
 
         private PageActionInvokerCacheEntry CreateCacheEntry(
@@ -172,6 +171,8 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
         {
             var actionDescriptor = (PageActionDescriptor)context.ActionContext.ActionDescriptor;
             var compiledActionDescriptor = _loader.Load(actionDescriptor);
+
+            var viewDataFactory = ViewDataDictionaryFactory.CreateFactory(compiledActionDescriptor.ModelTypeInfo);
 
             var pageFactory = _pageFactoryProvider.CreatePageFactory(compiledActionDescriptor);
             var pageDisposer = _pageFactoryProvider.CreatePageDisposer(compiledActionDescriptor);
@@ -194,6 +195,7 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
 
             return new PageActionInvokerCacheEntry(
                 compiledActionDescriptor,
+                viewDataFactory,
                 pageFactory,
                 pageDisposer,
                 modelFactory,
@@ -222,21 +224,6 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
             }
 
             return viewStartFactories;
-        }
-
-        private static object GetDefaultValue(ParameterInfo methodParameter)
-        {
-            object defaultValue = null;
-            if (methodParameter.HasDefaultValue)
-            {
-                defaultValue = methodParameter.DefaultValue;
-            }
-            else if (methodParameter.ParameterType.GetTypeInfo().IsValueType)
-            {
-                defaultValue = Activator.CreateInstance(methodParameter.ParameterType);
-            }
-
-            return defaultValue;
         }
 
         private static Func<object, object[], Task<IActionResult>>[] GetExecutors(CompiledPageActionDescriptor actionDescriptor)

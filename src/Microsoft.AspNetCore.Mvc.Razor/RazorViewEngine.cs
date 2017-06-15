@@ -6,9 +6,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.Encodings.Web;
-using Microsoft.AspNetCore.Mvc.Core.Internal;
+using Microsoft.AspNetCore.Mvc.Internal;
 using Microsoft.AspNetCore.Mvc.Razor.Internal;
 using Microsoft.AspNetCore.Mvc.ViewEngines;
 using Microsoft.AspNetCore.Razor.Language;
@@ -222,7 +221,7 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                     cacheResult = new ViewLocationCacheResult(new[] { applicationRelativePath });
                 }
 
-                cacheResult = ViewLookupCache.Set<ViewLocationCacheResult>(
+                cacheResult = ViewLookupCache.Set(
                     cacheKey,
                     cacheResult,
                     cacheEntryOptions);
@@ -303,13 +302,12 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                 return pagePath;
             }
 
-            string absolutePath;
             if (string.IsNullOrEmpty(executingFilePath))
             {
                 // Given a relative path i.e. not yet application-relative (starting with "~/" or "/"), interpret
                 // path relative to currently-executing view, if any.
                 // Not yet executing a view. Start in app root.
-                absolutePath = "/" + pagePath;
+                var absolutePath = "/" + pagePath;
                 return ViewEnginePath.ResolvePath(absolutePath);
             }
 
@@ -385,7 +383,7 @@ namespace Microsoft.AspNetCore.Mvc.Razor
                 cacheEntryOptions.AddExpirationToken(expirationToken);
             }
 
-            return ViewLookupCache.Set<ViewLocationCacheResult>(cacheKey, cacheResult, cacheEntryOptions);
+            return ViewLookupCache.Set(cacheKey, cacheResult, cacheEntryOptions);
         }
 
         // Internal for unit testing

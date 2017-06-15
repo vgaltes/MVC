@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
-using Microsoft.AspNetCore.Mvc.Razor.Internal;
+using Microsoft.AspNetCore.Mvc.Razor.Compilation;
 using Microsoft.AspNetCore.Mvc.RazorPages.Infrastructure;
 using Microsoft.Extensions.Internal;
 
@@ -14,28 +14,35 @@ namespace Microsoft.AspNetCore.Mvc.RazorPages.Internal
     public class DefaultPageLoader : IPageLoader
     {
         private const string ModelPropertyName = "Model";
-        
-        private readonly RazorCompiler _compiler;
 
-        public DefaultPageLoader(RazorCompiler compiler)
+        private readonly IViewCompilerProvider _viewCompilerProvider;
+
+        public DefaultPageLoader(IViewCompilerProvider viewCompilerProvider)
         {
-            _compiler = compiler;
+            _viewCompilerProvider = viewCompilerProvider;
         }
+
+        private IViewCompiler Compiler => _viewCompilerProvider.GetCompiler();
 
         public CompiledPageActionDescriptor Load(PageActionDescriptor actionDescriptor)
         {
-            var result = _compiler.Compile(actionDescriptor.RelativePath);
-            return CreateDescriptor(actionDescriptor, result.CompiledType.GetTypeInfo());
+            var compileTask = Compiler.CompileAsync(actionDescriptor.RelativePath);
+            var viewDescriptor = compileTask.GetAwaiter().GetResult();
+            var pageAttribute = (RazorPageAttribute)viewDescriptor.ViewAttribute;
+
+            return CreateDescriptor(actionDescriptor, pageAttribute);
         }
 
         // Internal for unit testing
-        internal static CompiledPageActionDescriptor CreateDescriptor(PageActionDescriptor actionDescriptor, TypeInfo pageType)
+        internal static CompiledPageActionDescriptor CreateDescriptor(
+            PageActionDescriptor actionDescriptor,
+            RazorPageAttribute pageAttribute)
         {
+            var pageType = pageAttribute.ViewType.GetTypeInfo();
+
             // Pages always have a model type. If it's not set explicitly by the developer using
             // @model, it will be the same as the page type.
-            //
-            // However, we allow it to be null here for ease of testing.
-            var modelType = pageType.GetProperty(ModelPropertyName)?.PropertyType.GetTypeInfo();
+            var modelType = pageAttribute.ViewType.GetProperty(ModelPropertyName)?.PropertyType?.GetTypeInfo();
 
             // Now we want to find the handler methods. If the model defines any handlers, then we'll use those,
             // otherwise look at the page itself (unless the page IS the model, in which case we already looked).

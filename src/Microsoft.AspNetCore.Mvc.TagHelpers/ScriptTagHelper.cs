@@ -4,13 +4,10 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
-using Microsoft.AspNetCore.Mvc.Razor;
 using Microsoft.AspNetCore.Mvc.Razor.TagHelpers;
-using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Mvc.TagHelpers.Internal;
 using Microsoft.AspNetCore.Razor.TagHelpers;
@@ -100,13 +97,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
         }
 
         /// <inheritdoc />
-        public override int Order
-        {
-            get
-            {
-                return -1000;
-            }
-        }
+        public override int Order => -1000;
 
         /// <summary>
         /// Address of the external script to use.

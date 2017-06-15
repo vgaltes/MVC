@@ -49,8 +49,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
         {
             if (excludePropertyErrors)
             {
-                ModelStateEntry ms;
-                viewData.ModelState.TryGetValue(viewData.TemplateInfo.HtmlFieldPrefix, out ms);
+                viewData.ModelState.TryGetValue(viewData.TemplateInfo.HtmlFieldPrefix, out var ms);
 
                 if (ms != null)
                 {
@@ -62,7 +61,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                 var metadata = viewData.ModelMetadata;
                 var modelStateDictionary = viewData.ModelState;
                 var entries = new List<ModelStateEntry>();
-                Visit(modelStateDictionary, modelStateDictionary.Root, metadata, entries);
+                Visit(modelStateDictionary.Root, metadata, entries);
 
                 if (entries.Count < modelStateDictionary.Count)
                 {
@@ -83,7 +82,6 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
         }
 
         private static void Visit(
-            ModelStateDictionary dictionary,
             ModelStateEntry modelStateEntry,
             ModelMetadata metadata,
             List<ModelStateEntry> orderedModelStateEntries)
@@ -92,7 +90,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
             {
                 foreach (var indexEntry in modelStateEntry.Children)
                 {
-                    Visit(dictionary, indexEntry, metadata.ElementMetadata, orderedModelStateEntries);
+                    Visit(indexEntry, metadata.ElementMetadata, orderedModelStateEntries);
                 }
             }
 
@@ -102,7 +100,7 @@ namespace Microsoft.AspNetCore.Mvc.ViewFeatures.Internal
                 var propertyModelStateEntry = modelStateEntry.GetModelStateForProperty(propertyMetadata.PropertyName);
                 if (propertyModelStateEntry != null)
                 {
-                    Visit(dictionary, propertyModelStateEntry, propertyMetadata, orderedModelStateEntries);
+                    Visit(propertyModelStateEntry, propertyMetadata, orderedModelStateEntries);
                 }
             }
 
